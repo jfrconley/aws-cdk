@@ -20,7 +20,32 @@ async function main() {
   }
 }
 
+async function bundleOnceAndCollectMetadata(submodulePath: string) {
+  const tmpDir = await fs.mkdtemp(submodulePath);
+  const results = await esbuild.build({
+    entryPoints: [path.join(submodulePath, 'index.ts')],
+    platform: 'node',
+    bundle: true,
+    minifyWhitespace: true,
+    minifySyntax: true,
+    sourcemap: 'external',
+    outdir: tmpDir,
+    logLevel: 'error',
+    metafile: true,
+  });
+  return results.metafile!;
+}
+
 async function minifySubmodule(submodulePath: string) {
+  const submoduleName = path.basename(submodulePath);
+  const metafile = await bundleOnceAndCollectMetadata(submodulePath);
+  const externalImports = new Set<string>();
+  [...Object.entries(metafile.inputs)].forEach(([_, data]) => {
+    data.imports.filter(x => !x.path.startsWith(`${submoduleName}/`))
+      .map(x => x.path)
+      .forEach(x => externalImports.add(x));
+  });
+
   await esbuild.build({
     entryPoints: [path.join(submodulePath, 'index.ts')],
     platform: 'node',
@@ -30,6 +55,7 @@ async function minifySubmodule(submodulePath: string) {
     sourcemap: 'external',
     outdir: submodulePath,
     logLevel: 'error',
+    external: Array.from(externalImports.values()),
   });
 
   async function recursivelyCleanFolder(target: string) {
